@@ -24,9 +24,7 @@ from fancyimpute import KNN, IterativeImputer, SoftImpute, BiScaler, SimpleFill
 
 # Function to create dataset for k-fold cross-validation
 def generateDataset(x_data, y_data, num_splits):
-
 	def gen():
-	
 		for train_index, test_index in KFold(num_splits).split(x_data):
 			x_train, x_test = x_data[train_index], x_data[test_index]
 			y_train, y_test = y_data[train_index], y_data[test_index]
@@ -35,7 +33,6 @@ def generateDataset(x_data, y_data, num_splits):
 	return tf.data.Dataset.from_generator(gen, (tf.float32,)*4)
 
 def main():
-
 	# Supress deprecation warnings from TensorFlow
 	tf.logging.set_verbosity(tf.logging.ERROR)
 	tf.enable_eager_execution()
@@ -66,57 +63,110 @@ def main():
 
 	x_data = in1_match.astype(np.float32).values
 	lb = preprocessing.LabelBinarizer()
-	y_data = lb.fit_transform(in2_match.loc[:,'gender']).ravel()
+	y_data_msi = lb.fit_transform(in2_match.loc[:,'msi']).ravel()
+	y_data_gender = lb.fit_transform(in2_match.loc[:,'gender']).ravel()
 
+	# Define parameters for RF
+	hparams = tensor_forest.ForestHParams(
+		num_classes=2,num_features=4115,
+		num_trees=10, max_nodes=100).fill()
 
-	# Generate dataset to perform k-fold cross validation (currently 10-fold)
-	dataset = generateDataset(x_data,y_data,10)
-	models = dict()
-	i = 1
-	print('-----------------------------------------------')
+	### Training
+	# 1) Make dataset for cross validation (K-Fold)
+	# 2) Split train dataset to train & test
 
-	# Perform k-fold cross-validation
-	for x_train, y_train, x_test, y_test in tfe.Iterator(dataset):
+	# # Generate dataset to perform k-fold cross validation (currently 10-fold)
+	# dataset = generateDataset(x_data,y_data,10)
+	# models = dict()
+	# i = 1
+	# print('-----------------------------------------------')
 
-		# Create uuid for model
-		m_name = uuid.uuid4().hex
-		# Make directory for model
-		os.mkdir(m_name)
+	# # Perform k-fold cross-validation
+	# for x_train, y_train, x_test, y_test in tfe.Iterator(dataset):
 
-		# Define parameters for RF
-		hparams = tensor_forest.ForestHParams(
-			num_classes=2,num_features=4115,
-			num_trees=10, max_nodes=100).fill()
+	# 	# Create uuid for model
+	# 	m_name = uuid.uuid4().hex
+	# 	# Make directory for model
+	# 	os.mkdir(m_name)
 
-		# Create and fit RF model
-		clf = random_forest.TensorForestEstimator(hparams, model_dir = m_name)
-		clf.fit(x = x_train.numpy(), y = y_train.numpy())
+	# 	# Create and fit RF model
+	# 	clf = random_forest.TensorForestEstimator(hparams, model_dir = m_name)
+	# 	clf.fit(x = x_train.numpy(), y = y_train.numpy())
 
-		# Make predictions
-		pred = list(clf.predict(x=x_test.numpy()))
-		# pred_prob = list(y['probabilities'] for y in pred)
-		# Make list of predictions
-		pred_class = list(y['classes'] for y in pred)
+	# 	# Make predictions
+	# 	pred = list(clf.predict(x=x_test.numpy()))
+	# 	# pred_prob = list(y['probabilities'] for y in pred)
+	# 	# Make list of predictions
+	# 	pred_class = list(y['classes'] for y in pred)
 
-		# Calculate accuracy
-		n = len(y_test.numpy())
-		class_zip = list(zip(y_test.numpy(), pred_class))
-		n_correct = sum(1 for p in class_zip if p[0]==p[1])
-		acc = n_correct/n
-		models[m_name] = acc
+	# 	# Calculate accuracy
+	# 	n = len(y_test.numpy())
+	# 	class_zip = list(zip(y_test.numpy(), pred_class))
+	# 	n_correct = sum(1 for p in class_zip if p[0]==p[1])
+	# 	acc = n_correct/n
+	# 	models[m_name] = acc
 
-		print('The accuracy of model #%d is: %f' % (i, acc))
-		i += 1
+	# 	print('The accuracy of model #%d is: %f' % (i, acc))
+	# 	i += 1
 
-	print('-----------------------------------------------')
-	print('The average accuracy of the models is : %f' % (sum(models.values())/len(models.values())))
-	print('-----------------------------------------------')
-	print('\nNames of directories containing models:\n')
+	# print('-----------------------------------------------')
+	# print('The average accuracy of the models is : %f' % (sum(models.values())/len(models.values())))
+	# print('-----------------------------------------------')
+	# print('\nNames of directories containing models:\n')
 
-	# Print models and their corresponding accuracies
-	for d in models:
-		print('%s\t%f' % (d, models[d]))
+	# # Print models and their corresponding accuracies
+	# for d in models:
+	# 	print('%s\t%f' % (d, models[d]))
+
+	### Predict gender and MSI
+	# 1) Train model on all train data
+	# 2) Make predictions on the test data (test_cli.tsv)
+
+	in3 = pd.read_csv('challenge_data/test_pro.tsv', sep='\t')
+	in4 = pd.read_csv('challenge_data/test_cli.tsv', sep='\t', index_col='sample')
+	in3 = in3.transpose()
+	# Remove proteins with no values
+	in3 = in3.drop(columns=['ATP7A','SMPX','TMEM35A'])
+	inTest = in3.astype(np.float32).values
+
+	print('Training the model on all train samples:\n')
+	clf_gender = random_forest.TensorForestEstimator(hparams, model_dir = 'finalGender')
+	clf_gender.fit(x=x_data, y=y_data_gender)
+
+	clf_msi = random_forest.TensorForestEstimator(hparams, model_dir = 'finalMsi')
+	clf_msi.fit(x=x_data, y=y_data_msi)
+
+	pred_gender = list(clf_gender.predict(x=inTest))
+	# Make list of predictions
+	pred_gender_class = list(y['classes'] for y in pred_gender)
+	dictGender = {0:'Female', 1:'Male'}
+	labelsGender = [dictGender.get(n,n) for n in pred_gender_class]
+
+	pred_msi = list(clf_msi.predict(x=inTest))
+	# Make list of predictions
+	pred_msi_class = list(y['classes'] for y in pred_msi)
+	dictMsi = {0:'MSI-High', 1:'MSI-Low/MSS'}
+	labelsMsi = [dictMsi.get(n,n) for n in pred_msi_class]
+
+	j = 0
+	f = open('randomForestTF_results.tsv', 'w')
+
+	for idx, row in in4.iterrows():
+		matchGender = 0
+		matchMsi = 0
+		matchBoth = 0
+
+		if row['gender'] != labelsGender[j]:
+			matchGender = 1
+		if row['msi'] != labelsMsi[j]:
+			matchMsi = 1
+		if matchGender != matchMsi:
+			matchBoth = 1
+
+		f.write(idx + "\t" + row['gender'] + "\t" + labelsGender[j] + "\t" + str(matchGender) + "\t" + 
+			row['msi'] + "\t" + labelsMsi[j] + "\t" + str(matchMsi) + "\t" + str(matchBoth))
+	
+	f.close()
 
 if __name__ == '__main__':
-
 	main()
