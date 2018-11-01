@@ -160,7 +160,7 @@ def main():
 			matchGender = 1
 		if row['msi'] != labelsMsi[j]:
 			matchMsi = 1
-		if matchGender != matchMsi:
+		if matchGender != 0 || matchMsi != 0:
 			matchBoth = 1
 
 		f.write(idx + "\t" + row['gender'] + "\t" + labelsGender[j] + "\t" + str(matchGender) + "\t" + 
