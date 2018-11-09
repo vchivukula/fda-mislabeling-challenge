@@ -1,0 +1,13 @@
+#! /usr/bin/env python3
+import pandas as pd
+import numpy as np
+import pandas as pd
+import scipy.stats as st
+
+df=pd.read_csv('/mnt/c/Users/Vasanta Chivukula/Documents/Vannbergclass/Challenge/newchallenge/train_rna.tsv', sep='\t') #train_rna file
+df1=pd.read_csv('/mnt/c/Users/Vasanta Chivukula/Documents/Vannbergclass/Challenge/newchallenge/train_pro.tsv', sep='\t') #train_pro file
+for i in df.columns:
+    for j in df1.columns:
+        if i==j:
+            #print(i,j)
+            print(i,'\t', j, '\t', df[i].corr(df1[j]))
