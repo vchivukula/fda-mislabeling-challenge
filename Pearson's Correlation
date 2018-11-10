@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import scipy.stats as st
 
-df=pd.read_csv('/mnt/c/Users/Vasanta Chivukula/Documents/Vannbergclass/Challenge/newchallenge/train_rna.tsv', sep='\t') #train_rna file
-df1=pd.read_csv('/mnt/c/Users/Vasanta Chivukula/Documents/Vannbergclass/Challenge/newchallenge/train_pro.tsv', sep='\t') #train_pro file
+df=pd.read_csv('/data2/ACHG2018FALL/NCI_CPTAC/challenge_data/train_rna.tsv', sep='\t') #train_rna file
+df1=pd.read_csv('/data2/ACHG2018FALL/NCI_CPTAC/challenge_data/train_pro.tsv', sep='\t') #train_pro file
 for i in df.columns:
     for j in df1.columns:
         if i==j:
