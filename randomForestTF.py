@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
 
-#	Tensorflow Random Forest Implementation
-#	BIOL 8803F
-#	Author: Dongjo Ban
+#	Summary:
+#	Tensorflow random forest implementation to predict gender & MSI using protein levels
+#	Missing values imputed using KNN
 #
-# 	Script outputs directories for the models. These can be used later.
+#	BIOL 8803F
+#	Dongjo Ban
 
 import os
 import uuid
 import numpy as np
 import pandas as pd
 import math
-# SKLEARN
 from sklearn.model_selection import train_test_split
 from sklearn import preprocessing
 from sklearn.model_selection import LeaveOneOut, KFold
-# TENSORFLOW
 import tensorflow as tf
 import tensorflow.contrib.eager as tfe
 from tensorflow.contrib.tensor_forest.python import tensor_forest
 from tensorflow.contrib.tensor_forest.client import random_forest
 from fancyimpute import KNN, IterativeImputer, SoftImpute, BiScaler, SimpleFill
 
-# Function to create dataset for k-fold cross-validation
+def randomForestParams():
+	return tensor_forest.ForestHParams(
+			num_classes=2,num_features=4115,
+			num_trees=10, max_nodes=100).fill()
+
 def generateDataset(x_data, y_data, num_splits):
+	# Create dataset for k-fold cross-validation
 	def gen():
 		for train_index, test_index in KFold(num_splits).split(x_data):
 			x_train, x_test = x_data[train_index], x_data[test_index]
@@ -31,6 +35,93 @@ def generateDataset(x_data, y_data, num_splits):
 			yield x_train, y_train, x_test, y_test
 	
 	return tf.data.Dataset.from_generator(gen, (tf.float32,)*4)
+
+def crossValidate(train_x, train_y, model):
+
+	### Training & Cross-validating
+	# 1) Make dataset for cross validation (K-Fold)
+	# 2) Split train dataset to train & test
+
+	# Generate dataset to perform k-fold cross validation (currently 10-fold)
+	dataset = generateDataset(train_x,train_y,10)
+	models = dict()
+	i = 1
+	print('-----------------------------------------------')
+
+	# Perform k-fold cross-validation
+	for x_train, y_train, x_test, y_test in tfe.Iterator(dataset):
+		
+		# Random Forest
+		if model == 'rf':
+			hparams = randomForestParams()
+			clf = random_forest.TensorForestEstimator(hparams)
+
+		# Temporary location where models are stored
+		# print(clf.model_dir)
+		# Create and fit model
+		clf.fit(x = x_train.numpy(), y = y_train.numpy())
+
+		# Make predictions
+		pred = list(clf.predict(x=x_test.numpy()))
+		# pred_prob = list(y['probabilities'] for y in pred)
+		# Make list of predictions
+		pred_class = list(y['classes'] for y in pred)
+
+		# Calculate accuracy
+		n = len(y_test.numpy())
+		class_zip = list(zip(y_test.numpy(), pred_class))
+		n_correct = sum(1 for p in class_zip if p[0]==p[1])
+		acc = n_correct/n
+		models[i] = acc
+		print('The accuracy of model #%d is: %f' % (i, acc))
+		i += 1
+
+	print('-----------------------------------------------')
+	print('The average accuracy of the models is : %f' % (sum(models.values())/len(models.values())))
+	print('-----------------------------------------------')
+
+def predict(train_x, train_y, test_x, model):
+	if model == 'rf':
+		# Train random forest model on all train samples
+		hparams = randomForestParams()
+		clf = random_forest.TensorForestEstimator(hparams)
+		clf.fit(x=train_x, y=train_y)
+
+	# Return list of predictions
+	return list(clf.predict(x=test_x))
+
+def getLabels(pred, label):
+	if label == 'gender':
+		d = {0:'Female', 1:'Male'}
+	elif label == 'msi':
+		d = {0:'MSI-High', 1:'MSI-Low/MSS'}
+	
+	pred_class = list(y['classes'] for y in pred)
+	return [d.get(n,n) for n in pred_class]
+
+def outResults(filename, labelsGender, labelsMsi):
+
+	j = 0
+	f = open(filename, 'w')
+
+	for idx, row in in4.iterrows():
+		matchGender = 0
+		matchMsi = 0
+		matchBoth = 0
+
+		if row['gender'] != labelsGender[j]:
+			matchGender = 1
+		if row['msi'] != labelsMsi[j]:
+			matchMsi = 1
+		if matchGender != 0 or matchMsi != 0:
+			matchBoth = 1
+
+		f.write(idx + "\t" + row['gender'] + "\t" + labelsGender[j] + "\t" + str(matchGender) + "\t" + 
+			row['msi'] + "\t" + labelsMsi[j] + "\t" + str(matchMsi) + "\t" + str(matchBoth) + '\n')
+
+		j += 1
+	
+	f.close()
 
 def main():
 	# Supress deprecation warnings from TensorFlow
@@ -52,9 +143,6 @@ def main():
 	imp1.columns = in1.columns
 	imp1.index = in1.index
 
-	# Create 4 labels based on 4 different combinations of gender & msi
-	# in2['genderMsi'] = in2['gender']+'.'+in2['msi']
-
 	# Only include samples that match
 	match = list(mismatch.query('mismatch==0').loc[:,'sample'])
 
@@ -66,57 +154,8 @@ def main():
 	y_data_msi = lb.fit_transform(in2_match.loc[:,'msi']).ravel()
 	y_data_gender = lb.fit_transform(in2_match.loc[:,'gender']).ravel()
 
-	# Define parameters for RF
-	hparams = tensor_forest.ForestHParams(
-		num_classes=2,num_features=4115,
-		num_trees=10, max_nodes=100).fill()
-
-	### Training
-	# 1) Make dataset for cross validation (K-Fold)
-	# 2) Split train dataset to train & test
-
-	# # Generate dataset to perform k-fold cross validation (currently 10-fold)
-	# dataset = generateDataset(x_data,y_data,10)
-	# models = dict()
-	# i = 1
-	# print('-----------------------------------------------')
-
-	# # Perform k-fold cross-validation
-	# for x_train, y_train, x_test, y_test in tfe.Iterator(dataset):
-
-	# 	# Create uuid for model
-	# 	m_name = uuid.uuid4().hex
-	# 	# Make directory for model
-	# 	os.mkdir(m_name)
-
-	# 	# Create and fit RF model
-	# 	clf = random_forest.TensorForestEstimator(hparams, model_dir = m_name)
-	# 	clf.fit(x = x_train.numpy(), y = y_train.numpy())
-
-	# 	# Make predictions
-	# 	pred = list(clf.predict(x=x_test.numpy()))
-	# 	# pred_prob = list(y['probabilities'] for y in pred)
-	# 	# Make list of predictions
-	# 	pred_class = list(y['classes'] for y in pred)
-
-	# 	# Calculate accuracy
-	# 	n = len(y_test.numpy())
-	# 	class_zip = list(zip(y_test.numpy(), pred_class))
-	# 	n_correct = sum(1 for p in class_zip if p[0]==p[1])
-	# 	acc = n_correct/n
-	# 	models[m_name] = acc
-
-	# 	print('The accuracy of model #%d is: %f' % (i, acc))
-	# 	i += 1
-
-	# print('-----------------------------------------------')
-	# print('The average accuracy of the models is : %f' % (sum(models.values())/len(models.values())))
-	# print('-----------------------------------------------')
-	# print('\nNames of directories containing models:\n')
-
-	# # Print models and their corresponding accuracies
-	# for d in models:
-	# 	print('%s\t%f' % (d, models[d]))
+	# Random Forest
+	# crossValidate(x_data, y_data_gender, 'rf')
 
 	### Predict gender and MSI
 	# 1) Train model on all train data
@@ -129,46 +168,16 @@ def main():
 	in3 = in3.drop(columns=['ATP7A','SMPX','TMEM35A'])
 	inTest = in3.astype(np.float32).values
 
-	print('Training the model on all train samples:\n')
-	clf_gender = random_forest.TensorForestEstimator(hparams, model_dir = 'finalGender')
-	clf_gender.fit(x=x_data, y=y_data_gender)
+	# Make predictions (gender) on test data using random forest model
+	pred_gender = predict(x_data, y_data_gender, inTest, 'rf')
+	labels_gender = getLabels(pred_gender, 'gender')
 
-	clf_msi = random_forest.TensorForestEstimator(hparams, model_dir = 'finalMsi')
-	clf_msi.fit(x=x_data, y=y_data_msi)
+	# Make predictions (MSI) on test data using random forest model
+	pred_msi = predict(x_data, y_data_msi, inTest, 'rf')
+	labels_msi = getLabels(pred_msi, 'msi')
 
-	pred_gender = list(clf_gender.predict(x=inTest))
-	# Make list of predictions
-	pred_gender_class = list(y['classes'] for y in pred_gender)
-	dictGender = {0:'Female', 1:'Male'}
-	labelsGender = [dictGender.get(n,n) for n in pred_gender_class]
-
-	pred_msi = list(clf_msi.predict(x=inTest))
-	# Make list of predictions
-	pred_msi_class = list(y['classes'] for y in pred_msi)
-	dictMsi = {0:'MSI-High', 1:'MSI-Low/MSS'}
-	labelsMsi = [dictMsi.get(n,n) for n in pred_msi_class]
-
-	j = 0
-	f = open('randomForestTF_results.tsv', 'w')
-
-	for idx, row in in4.iterrows():
-		matchGender = 0
-		matchMsi = 0
-		matchBoth = 0
-
-		if row['gender'] != labelsGender[j]:
-			matchGender = 1
-		if row['msi'] != labelsMsi[j]:
-			matchMsi = 1
-		if matchGender != 0 or matchMsi != 0:
-			matchBoth = 1
-
-		f.write(idx + "\t" + row['gender'] + "\t" + labelsGender[j] + "\t" + str(matchGender) + "\t" + 
-			row['msi'] + "\t" + labelsMsi[j] + "\t" + str(matchMsi) + "\t" + str(matchBoth) + '\n')
-
-		j += 1
-	
-	f.close()
+	# Final output
+	# outResults('randomForestTF_results.tsv', labels_gender, labels_msi)
 
 if __name__ == '__main__':
 	main()
